@@ -1,0 +1,137 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2024";
+
+package ginger;
+
+import "ginger/robust_prune_config.proto";
+
+// Config for building a PiPNN index.
+message PipnnConfig {
+  // Parameters of HashPrune, the per-node candidate reservoir used during leaf
+  // processing.
+  message HashPruneConfig {
+    // Maximum number of candidate neighbors maintained per node in the
+    // HashPrune table during leaf processing. Must be positive. Values below
+    // max_degree keep nodes from reaching full degree.
+    int32 reservoir_size = 1 [default = 96];
+
+    // Number of SimHash projection bits used for fast approximate duplicate
+    // filtering in HashPrune. Must be in [1, 16].
+    int32 num_hash_bits = 2 [default = 12];
+  }
+
+  // Parameters for sampling leaders in the recursive clustering.
+  message LeaderSelectionConfig {
+    // Fraction of points sampled as candidate leaders at each recursive
+    // clustering depth (for depth > 0). Must be in (0, 1].
+    float leader_sample_rate = 1 [default = 0.005];
+
+    // Number of leaders sampled at the root level (depth == 0). Must be in
+    // [1, 32767].
+    int32 top_level_leaders = 2 [default = 1024];
+
+    // Maximum number of leaders sampled at any recursive clustering depth
+    // (depth > 0). Must be in [3, 32767].
+    int32 max_num_leaders = 3 [default = 512];
+
+    // Number of nearest leaders each point is assigned to at each recursive
+    // clustering depth. Controls how many times a point is replicated (product
+    // of the fanout sequence).
+    //
+    // If recursive clustering uses more levels than the length of this field,
+    // a fanout of 1 is used for all deeper levels.
+    // Required: must contain at least one value, and all values must be at
+    // least 1. [10, 3] works well both for quality and performance.
+    repeated int32 fanout_sequence = 4;
+
+    // If true, for 5% of points at each level where fanout > 1, replaces the
+    // last assigned leader with a distinct random leader.
+    bool random_leader_replacement = 5 [default = false];
+  }
+
+  // Maximum number of points in a leaf cluster before triggering bidirected
+  // kNN graph construction. Must be at least 4.
+  int32 max_leaf_size = 1 [default = 1000];
+
+  // Minimum allowed cluster size during recursive partitioning. Smaller
+  // clusters are merged into neighboring clusters. Must be positive and less
+  // than or equal to max_leaf_size / 2 so that merging two undersized clusters
+  // cannot exceed max_leaf_size.
+  int32 min_leaf_size = 2 [default = 100];
+
+  // Number of independent recursive clustering passes to perform. Multiple
+  // passes are another way to do overlap. Must be at least 1.
+  int32 num_passes = 3 [default = 1];
+
+  // Maximum outgoing degree for each node in the final pruned graph. Must be
+  // positive.
+  int32 max_degree = 4 [default = 64];
+
+  // Deprecated: Use `prune_config.alpha` instead.
+  // Distance threshold (alpha) parameter used during RobustPrune to control
+  // edge selection diversity.
+  float robust_prune_alpha = 5 [default = 1.0, deprecated = true];
+
+  // Configuration for HashPrune edge filtering during leaf processing.
+  HashPruneConfig hash_prune = 6;
+
+  // Configuration for recursive leader selection and assignment routing.
+  LeaderSelectionConfig leader_selection = 7;
+
+  // If true, separates the recursive clustering phase from the leaf processing
+  // phase, collecting all leaves first before processing them in parallel.
+  // Phased build on: clean runtime measurement (separate for partitioning and
+  // leaves). Phased build off: slightly faster and uses less memory.
+  bool phased_build = 8;
+
+  // Random seed for reproducibility.
+  int32 seed = 9 [default = 42];
+
+  // If true, prints detailed index construction statistics (leaf size
+  // distribution, leaf depth, degree distribution, reachability, etc.).
+  bool print_stats = 10;
+
+  // How candidate edges are pruned during leaf processing.
+  enum PruningStrategy {
+    PRUNING_STRATEGY_UNSPECIFIED = 0;
+
+    // Uses the deterministic online HashPrune reservoir during leaf
+    // processing, followed by a final RobustPrune pass.
+    PRUNING_STRATEGY_HASH_PRUNE = 1;
+
+    // Stores candidate edges directly in FlatGraph and applies RobustPrune
+    // on the fly whenever a node exceeds max_degree during leaf processing.
+    // On-the-fly RobustPrune uses the same alpha as the final RobustPrune.
+    PRUNING_STRATEGY_ROBUST_PRUNE_ON_THE_FLY = 2;
+  }
+
+  // Strategy used to prune candidate edges during leaf processing.
+  PruningStrategy pruning_strategy = 11 [default = PRUNING_STRATEGY_HASH_PRUNE];
+
+  // Configuration for robust pruning. If unset, defaults to alpha = 1.0.
+  // Note: PiPNN uses `alpha`, `keep_pruned_neighbors`, and
+  // `reverse_rng_backfill`; `desired_degree` and `nonpositive_distances` are
+  // currently not honored by PiPNN.
+  RobustPruneConfig prune_config = 12;
+
+  // Fraction of a pass's points processed per chunk before flushing buffered
+  // candidate edges during deterministic on-the-fly robust pruning. 1.0
+  // disables chunking. Must be in (0, 1]. If
+  // `prune_config.reverse_rng_backfill` is set, this is also the fraction of
+  // nodes whose reverse edges are merged per backfill batch (at most 1M nodes
+  // per batch).
+  float robust_prune_chunk_fraction = 13 [default = 1.0];
+}

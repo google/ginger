@@ -1,0 +1,242 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2024";
+
+package ginger;
+
+import "ginger/pipnn/config.proto";
+import "ginger/projection/config.proto";
+import "ginger/vamana/config.proto";
+
+// Distance between a query and a data point. Lower distances mean more similar
+// points.
+enum DistanceMetric {
+  // Invalid value. A distance metric must be explicitly specified.
+  UNDEFINED_DISTANCE = 0;
+  // Negative dot product.
+  DOT_PRODUCT = 1;
+  // Squared Euclidean distance.
+  SQUARED_L2 = 2;
+}
+
+// Configuration used to instantiate the TurboQuant quantizer.
+message TurboQuantConfig {
+  // Where the per-datapoint norm scaling factors are stored.
+  export enum ScalingStorageMode {
+    // Chooses a mode automatically; see `allow_three_bit_prefix`.
+    SCALING_STORAGE_MODE_UNSPECIFIED = 0;
+
+    // Stores scaling factors in a separate side array (`NormStorage`).
+    SCALING_SEPARATE_ARRAY = 1;
+
+    // Appends the scaling factor (and optional squared norm) at the end of
+    // each quantized datapoint row without altering 4-bit code precision.
+    SCALING_ROW_TAIL = 2;
+
+    // Embeds the 16-bit float16 scaling factor in the MSBs of the first 16
+    // code bytes, quantizing the first 16 odd dimensions with a 3-bit codebook
+    // instead of 4-bit to avoid increasing the row stride. Building fails if
+    // the distance metric needs a stored squared norm or there are fewer than
+    // 32 dimensions.
+    SCALING_IN_THREE_BIT_PREFIX = 3;
+  }
+
+  // Random seed used to initialize the quantizer's internal state and
+  // codebooks.
+  int32 seed = 1;
+
+  // Number of extra bits to use for reranking to improve accuracy. Valid
+  // values are 0, 1, 2, 3, 4, 6, or 8 with 0 meaning no extra bits are used.
+  int32 extra_bits = 2;
+
+  // Specifies whether the quantized base points should be padded to align with
+  // cache lines. Padding can improve performance by reducing cache misses, but
+  // it increases the storage size.
+  bool padding = 3;
+
+  // Optional. Dimensionality prefix to use for TurboSlice candidate filtering
+  // (e.g., 256). If 0 (default), TurboSlice is disabled.
+  int32 turboslice_dimensionality = 4;
+
+  // Optional. Where to store the per-datapoint scaling factor.
+  ScalingStorageMode scaling_storage_mode = 5;
+
+  // Optional. Only consulted when `scaling_storage_mode` is
+  // `SCALING_STORAGE_MODE_UNSPECIFIED`, which picks `SCALING_ROW_TAIL` if it
+  // fits in spare padding or keeps 32B/64B row alignment, and otherwise
+  // `SCALING_SEPARATE_ARRAY`. When true, `SCALING_IN_THREE_BIT_PREFIX` is
+  // picked instead of `SCALING_SEPARATE_ARRAY` if eligible.
+  bool allow_three_bit_prefix = 6;
+}
+
+// Configuration used to instantiate the GingerSearcher, which provides the
+// interface to perform nearest neighbor searches for Euclidean and dot product
+// distances.
+message GingerSearcherConfig {
+  reserved 3, 4;
+
+  // Required. Distance metric used for index construction and search.
+  DistanceMetric distance_metric = 1;
+
+  // Graph construction algorithm and its parameters. Required unless a
+  // pre-built index is added to `GingerSearcherBuilder`. PiPNN builds much
+  // faster than Vamana at similar search quality.
+  oneof index_config {
+    VamanaConfig vamana_config = 2;
+    PipnnConfig pipnn_config = 5;
+  }
+
+  // Optional. Configuration for TurboQuant quantization. When provided, the
+  // input float dataset will be quantized using these parameters.
+  TurboQuantConfig turbo_quant = 6;
+
+  // Optional. Configuration for PCA projection. When provided, the float
+  // dataset and float query vectors will be projected to a lower-dimensional
+  // space prior to TurboQuant quantization using these parameters. Note that we
+  // only support PCA projection in combination with TurboQuant.
+  PcaProjectionConfig pca = 7;
+
+  // Optional. Whether to use graph compression to compress the graph index,
+  // which reduces the memory footprint of the index.
+  bool use_graph_compression = 8;
+
+  // Indicates that the dataset points are unit-normalized (||y||^2 = 1).
+  // When using SQUARED_L2, this enables an optimization in TurboQuant's
+  // distance computation to not store/load a vector's squared norm.
+  // When using DOT_PRODUCT, this shifts build-time distances to non-negative
+  // Squared L2 space (1 - dot(x, y)) during index construction and RobustPrune.
+  //
+  // When left unset, GingerSearcherBuilder autodetects unit-normalized float
+  // datasets (or inherits this from a pre-quantized dataset) and sets this to
+  // true. Setting this field explicitly disables autodetection.
+  bool normalized_datapoints = 9;
+
+  // Optional. Configuration for JL candidate filtering. When provided, the
+  // input float dataset will be projected and bit-quantized for fast candidate
+  // filtering.
+  JlConfig jl = 10;
+
+  // Optional. Graph reordering algorithm to use for reordering the dataset and
+  // graph. Can be used independently of graph compression to improve locality,
+  // or in conjunction with graph compression to improve compression ratios.
+  ReorderingAlgorithm reordering_algorithm = 11;
+
+  // Optional. Whether to drop the full-precision dataset after quantization
+  // and index construction. Requires a quantized dataset.
+  bool drop_dataset = 12;
+}
+
+// Graph reordering algorithm used to relabel nodes for memory locality.
+enum ReorderingAlgorithm {
+  // Invalid value. A reordering algorithm must be explicitly specified.
+  REORDERING_ALGORITHM_UNSPECIFIED = 0;
+  // Reorders nodes by recursively partitioning the symmetrized graph into
+  // balanced blocks using multi-level graph partitioning (KaMinPar).
+  RECURSIVE_GRAPH_PARTITIONING = 1;
+  // Reorders nodes by recursively bisecting the bipartite query-data graph to
+  // minimize edge log-gap cost.
+  RECURSIVE_GRAPH_BISECTION = 2;
+  // Reorders nodes by recursively computing heavy-edge matchings and
+  // contracting matched supernodes into contiguous ID ranges.
+  RECURSIVE_GRAPH_CONTRACTION = 3;
+  // No reordering is performed.
+  REORDERING_ALGORITHM_NONE = 4;
+}
+
+// How candidates are scored during graph traversal.
+enum SearchSpace {
+  // Invalid value. A search space must be explicitly specified.
+  SEARCH_SPACE_UNSPECIFIED = 0;
+  // Scores candidates with the full-precision dataset.
+  SEARCH_SPACE_FLOAT = 1;
+  // Scores candidates with 4-bit TurboQuant codes. Requires `turbo_quant`.
+  SEARCH_SPACE_TURBO_QUANT = 2;
+}
+
+// How the final candidates are rescored after graph traversal.
+enum RerankingStrategy {
+  // Invalid value. A reranking strategy must be explicitly specified.
+  RERANKING_STRATEGY_UNSPECIFIED = 0;
+  // No reranking is performed.
+  RERANKING_STRATEGY_NONE = 1;
+  // Rescores the final candidates with the full-precision dataset.
+  RERANKING_STRATEGY_FLOAT = 2;
+  // Rescores the final candidates with TurboQuant codes that include the
+  // extra bits. Requires `turbo_quant.extra_bits` > 0.
+  RERANKING_STRATEGY_TURBO_QUANT_EXTRA_BITS = 3;
+}
+
+// Configuration used to instantiate the JL (Johnson-Lindenstrauss) dataset.
+message JlConfig {
+  // Target JL dimensionality in bits (e.g. 512, 1024). Default is 1024.
+  // Must be positive (> 0) and a multiple of 64.
+  int32 jl_dimensionality = 1 [default = 1024];
+
+  // Random seed for the sparse JL projection matrix.
+  int32 seed = 2 [default = 12345];
+}
+
+// Use TurboSlice as a candidate pre-filter. Only supported when TurboQuant is
+// enabled, and the TurboQuant dataset has TurboSlice enabled.
+// TurboSlice uses a prefix of the already quantized dimensions as an
+// approximate distance.
+message TurboSliceFilterConfig {}
+
+// Use 1-bit Johnson-Lindenstrauss random projection sketch as a candidate
+// pre-filter.
+message JlFilterConfig {}
+
+// A cheap pre-filter that skips full distance computations for candidates
+// that are unlikely to enter the beam.
+message CandidateFilterConfig {
+  // The approximate distance used by the filter.
+  oneof filter_type {
+    TurboSliceFilterConfig turbo_slice = 1;
+    JlFilterConfig jl = 3;
+  }
+  // Number of beam tail entries to average for the BeamMean threshold.
+  // 0 disables candidate filtering. Must not be negative.
+  int32 beam_mean_width = 2 [default = 5];
+}
+
+// Per-query search parameters, passed to `GingerSearcher::FindNeighbors`.
+message SearchOptions {
+  // How to score candidates during graph traversal.
+  // SEARCH_SPACE_UNSPECIFIED is invalid; a search space must be explicitly
+  // specified.
+  SearchSpace search_space = 1;
+
+  // How to rescore the final result set for higher accuracy.
+  // RERANKING_STRATEGY_UNSPECIFIED is invalid; a reranking strategy must be
+  // explicitly specified.
+  RerankingStrategy reranking_strategy = 2;
+
+  // Candidate pre-filtering. Not set = no filtering.
+  // Set the oneof to choose the filter type.
+  CandidateFilterConfig candidate_filter = 3;
+
+  // Required. Size of the search beam (the data structure used to maintain
+  // candidates). Must be positive (> 0). Higher values achieve higher recall at
+  // the expense of higher search latency.
+  int32 beam_size = 4;
+
+  // Optional. Multiplier for `num_neighbors` to determine max number of
+  // neighbors to rerank. Must be positive (> 0) when set. If unset, the entire
+  // beam is reranked.
+  float rerank_factor = 5;
+
+  // Required. Number of nearest neighbors to return. Must be positive (> 0).
+  int32 num_neighbors = 6;
+}

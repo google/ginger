@@ -1,0 +1,147 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+module(
+    name = "ginger",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_cc", version = "0.2.18")
+bazel_dep(name = "abseil-cpp", version = "20260817.0")
+bazel_dep(name = "protobuf", version = "35.1")
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
+bazel_dep(name = "google_benchmark", version = "1.9.5")
+bazel_dep(name = "highway", version = "1.4.0")
+bazel_dep(name = "onetbb", version = "2022.3.0")
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+
+# Optional allocator for `--config=jemalloc` (see .bazelrc).
+bazel_dep(name = "jemalloc", version = "5.3.0-bcr.4", dev_dependency = True)
+
+register_toolchains(
+    "@rules_foreign_cc//toolchains:preinstalled_make_toolchain",
+    "@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain",
+    "@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain",
+)
+
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+git_repository(
+    name = "eigen",
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(
+    name = "eigen",
+    hdrs = glob(["Eigen/*", "Eigen/**", "unsupported/Eigen/*", "unsupported/Eigen/**"], allow_empty = True),
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+""",
+    commit = "3147391d946bb4b6c68edd901f2add6ac1f31f8c",
+    remote = "https://gitlab.com/libeigen/eigen.git",
+)
+
+git_repository(
+    name = "parlaylib",
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(
+    name = "parlaylib",
+    hdrs = glob(["include/parlay/**", "include/**", "parlay/**"], allow_empty = True),
+    strip_include_prefix = "include",
+    includes = ["include", "."],
+    visibility = ["//visibility:public"],
+)
+[cc_library(name = name, deps = [":parlaylib"], visibility = ["//visibility:public"]) for name in [
+    "parallel", "primitives", "sequence", "delayed_sequence", "slice", "thread_specific", "utilities", "internal", "type_traits", "monoid", "range", "random", "io"
+]]
+""",
+    commit = "352f5367a6b3bd2f0c6f05882cdd02e978e349ea",
+    patch_cmds = [
+        "find include -name BUILD -delete",
+        "find include -name BUILD.bazel -delete",
+        "find include -name MODULE.bazel -delete",
+    ],
+    remote = "https://github.com/ParAlg/parlaylib.git",
+)
+
+git_repository(
+    name = "kaminpar",
+    build_file_content = """
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+)
+
+cmake(
+    name = "kaminpar",
+    lib_source = ":all_srcs",
+    build_args = ["--", "-j"],
+    cache_entries = {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_STANDARD": "20",
+        "KAMINPAR_BUILD_APPS": "OFF",
+        "KAMINPAR_BUILD_DISTRIBUTED": "OFF",
+        "KAMINPAR_BUILD_TESTS": "OFF",
+        "KAMINPAR_BUILD_TOOLS": "OFF",
+        "KAMINPAR_BUILD_BENCHMARKS": "OFF",
+        "KAMINPAR_BUILD_EXAMPLES": "OFF",
+        "KAMINPAR_BUILD_IO": "OFF",
+        "KAMINPAR_BUILD_WITH_CCACHE": "OFF",
+        "KAMINPAR_BUILD_WITH_WHFC": "OFF",
+        "KAMINPAR_BUILD_WITH_KASSERT": "OFF",
+        "KAMINPAR_BUILD_WITH_SPARSEHASH": "OFF",
+        "KAMINPAR_ENABLE_TBB_MALLOC": "OFF",
+        "KAMINPAR_64BIT_EDGE_IDS": "ON",
+        "KAMINPAR_64BIT_WEIGHTS": "ON",
+        "KAMINPAR_ENABLE_TIMERS": "OFF",
+        "KAMINPAR_DOWNLOAD_TBB": "OFF",
+        "BUILD_TESTING": "OFF",
+    },
+    out_static_libs = ["libKaMinPar.a"],
+    out_include_dir = "include",
+    deps = ["@onetbb//:tbb"],
+    defines = [
+        "KAMINPAR_64BIT_EDGE_IDS",
+        "KAMINPAR_64BIT_WEIGHTS",
+    ],
+    visibility = ["//visibility:public"],
+)
+""",
+    commit = "e212b7d056167d91027e1569cf7e5c109a91d153",
+    patch_cmds = [
+        """cat << 'EOF' > cmake/modules/FindTBB.cmake
+add_library(TBB::tbb UNKNOWN IMPORTED)
+find_path(TBB_INCLUDE_DIR NAMES tbb/tbb.h oneapi/tbb.h PATH_SUFFIXES include)
+find_library(TBB_LIBRARY NAMES tbb PATH_SUFFIXES lib)
+set_target_properties(TBB::tbb PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIR}"
+    IMPORTED_LOCATION "${TBB_LIBRARY}"
+)
+set(TBB_FOUND TRUE)
+set(TBB_VERSION "2022.3.0")
+EOF
+""",
+        # TODO: push these changes upstream
+        "sed -i '1s|^|add_compile_options(-fexceptions)\\nfile(REMOVE \"$ENV{EXT_BUILD_DEPS}/include/semaphore.h\")\\n|' CMakeLists.txt",
+        "sed -i 's/template <typename T> T floor_log2(const T arg) {/template <typename T> T floor_log2(const T arg) { if (arg == 0) return 0;/' kaminpar-common/math.h",
+        "sed -i '1s|^|#include <cstdint>\\n|' kaminpar-shm/partitioning/partition_utils.cc",
+        "sed -i 's/const BlockID reversed_block =/const uint64_t reversed_block = (uint64_t)/' kaminpar-shm/partitioning/partition_utils.cc",
+        "sed -i 's/bool has_intervals;/bool has_intervals = false;/' kaminpar-common/graph_compression/compressed_neighborhoods.h",
+        "sed -i 's/ptr = static_cast<T \\*>(malloc(nbytes));/nbytes = ((nbytes + alignof(T) - 1) \\/ alignof(T)) * alignof(T); ptr = static_cast<T \\*>(aligned_alloc(alignof(T), nbytes));/g' kaminpar-common/parallel/tbb_malloc.h",
+    ],
+    remote = "https://github.com/KaHIP/KaMinPar.git",
+)

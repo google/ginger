@@ -1,0 +1,73 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2024";
+
+package ginger;
+
+// Configuration for robust pruning in graph index construction.
+//
+// Given a source node `p`, RobustPrune sorts candidate neighbors by ascending
+// distance from `p` and inductively builds up a set of survivors (up to
+// `max_degree`). A candidate `c` survives if for all existing survivors `s`,
+// `d(s, c) >= d(p, c) / alpha` (or `d(s, c) >= d(p, c) * alpha` when
+// `nonpositive_distances` is true). Otherwise, the edge `(p, c)` is pruned as
+// redundant because, intuitively, a search can traverse `(p, s)` and then
+// navigate to `c` via `s` (though the edge `(s, c)` may not exist).
+message RobustPruneConfig {
+  // The alpha parameter for the robust pruning. Must be >= 1.0.
+  float alpha = 1 [default = 1.0];
+
+  // If set, we adaptively tune alpha for each node to ensure that each node
+  // has at least `desired_degree` neighbors, if possible. If regular pruning
+  // yields fewer than `desired_degree` survivors, pruned candidates `c` are
+  // greedily added in increasing order of the minimum alpha required for them
+  // not to be pruned by any current survivor `s`, i.e.,
+  // `max_s d(p, c) / d(s, c)` (or `max_s d(s, c) / d(p, c)` when
+  // `nonpositive_distances` is true), until `desired_degree` is reached. If
+  // there are fewer candidates than `desired_degree`, we accept all of them.
+  //
+  // Note: Currently only supported in Vamana; ignored by PiPNN.
+  int32 desired_degree = 2;
+
+  // If set, we only consider non-positive distances as valid distances and
+  // invert the alpha threshold to `d(s, c) >= d(p, c) * alpha`. Otherwise,
+  // we only consider non-negative distances with threshold
+  // `d(s, c) >= d(p, c) / alpha`. Candidates with distances of the opposite
+  // sign are discarded. This ensures that we correctly interpret the alpha
+  // parameter (larger alpha keeps more edges).
+  //
+  // Note: Currently only supported in Vamana; ignored by PiPNN.
+  bool nonpositive_distances = 3;
+
+  // If true, fills up the neighbor list with pruned candidates (sorted by
+  // increasing distance) until the graph's degree limit is reached (a second
+  // graph pruning parameter provided next to this config).
+  bool keep_pruned_neighbors = 4;
+
+  // If true, fills each node `u`'s neighbor list up to the graph's degree limit
+  // `max_degree` in the following order:
+  //   1. The closest `(max_degree + 1) / 2` RobustPrune survivors of `u`
+  //      ("primary survivors").
+  //   2. Reverse edges to the nodes `v` that have `u` among their primary
+  //      survivors. If they exceed the remaining capacity, only the closest
+  //      ones are kept.
+  //   3. The remaining RobustPrune survivors of `u` in increasing distance
+  //      order.
+  //   4. If `keep_pruned_neighbors` is also true, the pruned candidates of `u`
+  //      in increasing distance order.
+  //
+  // Note: Currently only supported in PiPNN; rejected by Vamana.
+  bool reverse_rng_backfill = 5;
+}

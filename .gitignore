@@ -1,0 +1,7 @@
+/bazel-*
+/build/
+/cmake-build-*/
+/.cache/
+MODULE.bazel.lock
+CMakeUserPresets.json
+compile_commands.json

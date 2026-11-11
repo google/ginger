@@ -1,0 +1,106 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2024";
+
+package ginger;
+
+import "ginger/projection/config.proto";
+import "ginger/searcher.proto";
+
+message FlatGraphHeader {
+  int32 num_nodes = 1;
+  int32 max_degree = 2;
+  reserved 3;
+}
+
+message CompressedGraphHeader {
+  int64 num_nodes = 1;
+  int64 num_arcs = 2;
+  int64 num_compressed_bytes = 3;
+  reserved 4;
+}
+
+message DatasetHeader {
+  int64 num_points = 1;
+  reserved 2, 3;
+  reserved point_size_in_bytes;
+  int64 dimensionality = 4;
+}
+
+message QuantizedDatasetHeader {
+  int64 num_datapoints = 1;
+  int64 dimensionality = 2;
+  int32 random_seed = 6;
+  reserved 3, 5;
+  enum DistanceMetric {
+    DEFAULT_DOT_PRODUCT = 0;
+    SQUARED_L2 = 1;
+  }
+  DistanceMetric metric = 4;
+  int64 serialized_point_size = 7;
+  int32 quantization_bits = 8;
+  bool normalized_datapoints = 9;
+  // Number of leading dimensions used for TurboSlice candidate filtering, or 0
+  // if TurboSlice is disabled. When positive, the per-point TurboSlice scaling
+  // factors are stored in a separate entry.
+  int32 turboslice_dimensionality = 10;
+  // Where the scaling factors are stored. The dataset is loaded with the same
+  // mode. Files without it never use the 3-bit prefix.
+  TurboQuantConfig.ScalingStorageMode scaling_storage_mode = 11;
+}
+
+message GingerSearcherHeader {
+  GingerSearcherConfig config = 1;
+  int64 dimensionality = 5;
+  bool has_float_dataset = 2;
+  bool has_quantized_dataset = 3;
+  bool has_graph_index = 4;
+  bool has_jl_dataset = 6;
+  bool has_pca_projection = 7;
+
+  enum IndexType {
+    INDEX_TYPE_UNSPECIFIED = 0;
+    INDEX_TYPE_NONE = 1;
+    INDEX_TYPE_FLAT_GRAPH = 2;
+    INDEX_TYPE_COMPRESSED_GRAPH = 3;
+  }
+  IndexType index_type = 8;
+  // Stored node ID used to start search. Legacy files start at node zero.
+  int32 entry_point = 9;
+  reserved 10;
+  bool has_inverse_reordering = 11;
+  // Whether the full-dimensional extra-bits rerank dataset that PCA uses is
+  // saved.
+  bool has_rerank_quantized_dataset = 12;
+  // CRC32C over a sample of the float dataset in its original point order.
+  // `LoadGingerSearcherBuilder` checks a reattached dataset against it.
+  fixed32 dataset_fingerprint = 13;
+}
+
+message JlDatasetHeader {
+  int64 num_points = 1;
+  int32 source_dim = 2;
+  int32 jl_dim = 3;
+  int32 seed = 4;
+  DistanceMetric metric = 5;
+  reserved 6;
+}
+
+message PcaProjectionHeader {
+  int32 input_dim = 1;
+  int32 output_dim = 2;
+  MatrixRepresentation matrix_representation = 3;
+  reserved 4;
+}

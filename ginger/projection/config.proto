@@ -1,0 +1,95 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2024";
+
+package ginger;
+
+// The storage representation of the PCA projection matrix. We support
+// quantized representations to reduce memory traffic when projecting vectors.
+enum MatrixRepresentation {
+  MATRIX_REPRESENTATION_UNSPECIFIED = 0;
+  // Projection matrix is stored as single-precision floats (float32).
+  MATRIX_REPRESENTATION_FLOAT = 1;
+  // Projection matrix rows are quantized to 4 bits per entry using
+  // TurboQuant.
+  MATRIX_REPRESENTATION_TURBOQUANT = 2;
+}
+
+// Config for a PCA projection that reduces the dimensionality of the dataset.
+message PcaProjectionConfig {
+  // Chooses the target dimensionality from the explained variance.
+  message Truncation {
+    // The significance threshold for PCA truncation. PCA will truncate the
+    // dimensionality to preserve at least this fraction of the total variance.
+    // E.g., 0.9 preserves 90% of the variance. Must be in (0, 1].
+    float significance_threshold = 1;
+
+    // The truncation threshold for PCA truncation. Truncation is only applied
+    // if the resulting dimensionality is strictly less than this fraction of
+    // the original input dimension. E.g., 0.75 means truncation is only applied
+    // if the resulting dimension is less than 75% of the original dimension.
+    // Note the truncation is applied after rounding up the dimension to the
+    // next multiple of `alignment` (if specified). Must be in (0, 1].
+    float truncation_threshold = 2;
+
+    // Optional. If non-zero, the resulting dimension will be rounded up to the
+    // next multiple of this number. Must be non-negative.
+    int32 alignment = 3;
+
+    // Optional. If non-zero, the resulting dimension is rounded up to the next
+    // value of the form `k * alignment - alignment_tail` instead. This reserves
+    // room at the end of aligned rows, e.g. for a per-row norm entry. Must be
+    // in [0, alignment).
+    int32 alignment_tail = 4;
+  }
+
+  // How points are subsampled for PCA training.
+  message Sampling {
+    // Random seed used for subsampling.
+    int32 seed = 1 [default = 42];
+
+    // How many points to sample.
+    oneof strategy {
+      // The maximum number of points to sample for PCA training. If greater
+      // than or equal to the dataset size, all points are used. Must be at
+      // least 2.
+      int32 sample_size = 2;
+
+      // The number of points to sample per input dimension, corresponding to
+      // `samples_per_dimension * input_dim` points in total. If the resulting
+      // count is greater than or equal to the dataset size, all points are
+      // used. Must be positive, and the total sample count must be at least 2.
+      int32 samples_per_dimension = 3;
+    }
+  }
+
+  // How the target dimensionality is chosen.
+  oneof mode {
+    // The fixed target dimensionality for PCA projection. Must be positive and
+    // less than or equal to the dimensionality of the points in the dataset.
+    int32 dimension = 1;
+
+    // Truncate the dimensionality based on variance preservation.
+    Truncation truncation = 2;
+  }
+
+  // The storage representation to use for the projection matrix.
+  MatrixRepresentation matrix_representation = 3
+      [default = MATRIX_REPRESENTATION_FLOAT];
+
+  // Optional. Configuration for subsampling the dataset prior to PCA training.
+  // If unset, all points in the dataset are used.
+  Sampling sampling = 4;
+}

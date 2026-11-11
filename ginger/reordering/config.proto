@@ -1,0 +1,70 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2024";
+
+package ginger;
+
+// Config for RECURSIVE_GRAPH_BISECTION reordering.
+message RecursiveGraphBisectionReorderingConfig {
+  // The size of the subproblem at which the recursive bisection stops. This
+  // value must be at least 1.
+  int32 base_case_threshold = 1 [default = 1];
+
+  // The maximum number of refinement iterations to perform at each recursion.
+  int32 max_num_refinement_iterations = 2 [default = 20];
+
+  // The minimum percentage of the total number of data nodes that must be
+  // moved in a refinement iteration. If fewer nodes are moved, the
+  // refinement process is aborted.
+  float min_refinement_swap_factor = 3 [default = 0.01];
+
+  // The minimum relative improvement in the objective function that must be
+  // achieved in a refinement iteration. If less improvement is achieved, the
+  // refinement process is aborted.
+  float min_refinement_improvement_factor = 4 [default = 0.001];
+}
+
+// Config for RECURSIVE_GRAPH_CONTRACTION reordering.
+message RecursiveGraphContractionReorderingConfig {
+  // The base case threshold determines the minimum number of nodes that a
+  // subgraph must have in order to be (recursively) contracted. Subgraphs with
+  // fewer nodes than this threshold are ordered as a single unit.
+  int32 base_case_threshold = 1 [default = 1];
+
+  // The maximum number of times the recursion is performed. This value must be
+  // at least 1.
+  int32 max_recursion_depth = 2 [default = 2147483647];
+}
+
+// Config for RECURSIVE_GRAPH_PARTITIONING reordering.
+message RecursiveGraphPartitioningReorderingConfig {
+  // The base case threshold determines the minimum number of nodes that a
+  // subgraph must have in order to be (recursively) partitioned. Subgraphs with
+  // fewer nodes than this threshold are ordered as a single unit.
+  int32 base_case_threshold = 1 [default = 128];
+
+  // The branching factor used for the top level of the recursion. This value
+  // must be at least two.
+  int32 top_level_branching_factor = 2 [default = 512];
+
+  // The number of blocks that a graph is partitioned into at each step.
+  // This value must be at least two.
+  int32 branching_factor = 3 [default = 32];
+
+  // Determines how balanced the partition is that is computed for each
+  // subproblem. A smaller value enforces a more balanced partition. This value
+  // must be between 0 and 1.
+  float imbalance_parameter = 4 [default = 0.03];
+}

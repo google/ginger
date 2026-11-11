@@ -1,0 +1,49 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+edition = "2024";
+
+package ginger;
+
+import "ginger/robust_prune_config.proto";
+
+// Config for building a Vamana index.
+message VamanaConfig {
+  // The maximum degree of the graph. Must be positive.
+  int32 max_degree = 1;
+
+  // Specifies the parameters for a single pass of the build algorithm.
+  message Pass {
+    // The maximum beam width of the beam search. Must be positive.
+    int32 max_beam_width = 1;
+
+    // RobustPrune parameters for this pass. `alpha` must be at least 1.0.
+    // `nonpositive_distances` is set by `GingerSearcherBuilder` from the
+    // distance metric. `reverse_rng_backfill` is not supported.
+    RobustPruneConfig prune_config = 3;
+
+    reserved 2;
+  }
+
+  // The list of passes to run. Must contain at least one pass. Fields that a
+  // pass leaves unset are copied from the previous pass.
+  repeated Pass passes = 2;
+
+  // The seed to use for the random number generator.
+  int32 seed = 3;
+
+  // If enabled log the progress to stdout. Otherwise, log to INFO. stdout
+  // offers a nicer progress tracker.
+  bool log_progress_to_stdout = 4;
+}
